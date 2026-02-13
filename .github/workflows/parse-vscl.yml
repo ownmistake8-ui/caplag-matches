@@ -1,0 +1,100 @@
+name: Парсинг VSCL матчей
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Каждые 30 минут
+  workflow_dispatch:  # Можно запускать вручную
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout репозитория
+        uses: actions/checkout@v3
+      
+      - name: Получить страницу VSCL
+        run: |
+          curl -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            'https://www.vscl.ru/team/12482/caplag-esports' > vscl-page.html
+      
+      - name: Распарсить матчи
+        run: |
+          node -e "
+          const fs = require('fs');
+          const html = fs.readFileSync('vscl-page.html', 'utf8');
+          
+          const matches = [];
+          
+          // Ищем блок с последними матчами
+          const lastMatchesMatch = html.match(/<div class=\\\"team-last-matches\\\">(.*?)<\\/div>/s);
+          
+          if (lastMatchesMatch) {
+            const matchesHtml = lastMatchesMatch[1];
+            
+            // Находим все матчи
+            const matchRegex = /<div class=\\\"last-match-item\\\">(.*?)<\\/div>/gs;
+            let match;
+            
+            while ((match = matchRegex.exec(matchesHtml)) !== null) {
+              const block = match[1];
+              
+              const opponentMatch = block.match(/<div class=\\\"team-name\\\">(.*?)<\\/div>/);
+              const scoreMatch = block.match(/<div class=\\\"score\\\">(\\d+)\\s*:\\s*(\\d+)<\\/div>/);
+              const mapMatch = block.match(/<div class=\\\"map\\\">(.*?)<\\/div>/);
+              const dateMatch = block.match(/<div class=\\\"date\\\">(.*?)<\\/div>/);
+              
+              if (opponentMatch && scoreMatch) {
+                const opponent = opponentMatch[1].replace(/<[^>]*>/g, '').trim();
+                const ourScore = scoreMatch[1];
+                const enemyScore = scoreMatch[2];
+                const isWin = parseInt(ourScore) > parseInt(enemyScore);
+                const map = mapMatch ? mapMatch[1].trim().toUpperCase() : 'N/A';
+                let date = dateMatch ? dateMatch[1].trim() : '';
+                let timestamp = new Date().toISOString();
+                
+                // Парсим русскую дату
+                const months = {
+                  'янв': '01', 'фев': '02', 'мар': '03', 'апр': '04',
+                  'май': '05', 'июн': '06', 'июл': '07', 'авг': '08',
+                  'сен': '09', 'окт': '10', 'ноя': '11', 'дек': '12'
+                };
+                
+                for (const [month, num] of Object.entries(months)) {
+                  if (date.includes(month)) {
+                    const day = date.match(/(\\d+)/)?.[1] || '1';
+                    const year = new Date().getFullYear();
+                    timestamp = new Date(`${year}-${num}-${day.padStart(2, '0')}`).toISOString();
+                    date = `${day.padStart(2, '0')}.${num}`;
+                    break;
+                  }
+                }
+                
+                matches.push({
+                  platform: 'VSCL',
+                  date: date,
+                  timestamp: timestamp,
+                  map: map,
+                  ourScore: ourScore,
+                  enemyScore: enemyScore,
+                  opponent: opponent,
+                  isWin: isWin,
+                  tournament: 'VSCL Турнир'
+                });
+              }
+            }
+          }
+          
+          // Сортируем по дате
+          matches.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          
+          fs.writeFileSync('vscl-matches.json', JSON.stringify(matches, null, 2));
+          console.log('✅ Сохранено матчей:', matches.length);
+          "
+      
+      - name: Сохранить в репозиторий
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vscl-matches.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Автообновление VSCL матчей [$(date +'%d.%m.%Y %H:%M')]"
+          git push

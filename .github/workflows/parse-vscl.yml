@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout репозитория
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GH_TOKEN }}
       
       - name: Получить страницу VSCL
         run: |
@@ -64,8 +66,8 @@ jobs:
                     const dayMatch = date.match(/(\d+)/);
                     const day = dayMatch ? dayMatch[1] : "1";
                     const year = new Date().getFullYear();
-                    timestamp = new Date(year + "-" + num + "-" + day.padStart(2, "0")).toISOString();
-                    date = day.padStart(2, "0") + "." + num;
+                    timestamp = new Date(`${year}-${num}-${day.padStart(2, "0")}`).toISOString();
+                    date = `${day.padStart(2, "0")}.${num}`;
                     break;
                   }
                 }
@@ -99,3 +101,5 @@ jobs:
           git add vscl-matches.json
           git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Автообновление VSCL матчей [$(date +'%d.%m.%Y %H:%M')]"
           git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
